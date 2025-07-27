@@ -11,10 +11,12 @@ import io.mockk.mockk
 import junit.framework.TestCase.assertEquals
 import junit.framework.TestCase.assertTrue
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.test.runTest
 import org.junit.Before
 import org.junit.Test
 
+@ExperimentalCoroutinesApi
 class ContactRepositoryImplTest {
 
     private lateinit var contentResolver: ContentResolver
@@ -25,7 +27,6 @@ class ContactRepositoryImplTest {
         contentResolver = mockk()
         repository = ContactRepositoryImpl(contentResolver)
     }
-
 
     @Test
     fun `getContacts returns one contact from content resolver`() = runTest {
@@ -43,7 +44,7 @@ class ContactRepositoryImplTest {
 
         every { cursor.close() } just Runs
 
-        val result = repository.getContacts()
+        val result = repository.getContacts().first()
 
         assertEquals(1, result.size)
         assertEquals("John Doe", result[0].name)
@@ -66,17 +67,18 @@ class ContactRepositoryImplTest {
         every { cursor.getString(2) } answers { if (row == 1) "111111" else "222222" }
         every { cursor.close() } just Runs
 
-        val contacts = repository.getContacts()
+        val contacts = repository.getContacts().first()
 
         assertEquals(2, contacts.size)
         assertEquals("John", contacts[0].name)
         assertEquals("Alice", contacts[1].name)
     }
+
     @Test
     fun `getContacts returns empty list when cursor is null`() = runTest {
         every { contentResolver.query(any(), any(), any(), any(), any()) } returns null
 
-        val contacts = repository.getContacts()
+        val contacts = repository.getContacts().first()
 
         assertTrue(contacts.isEmpty())
     }
@@ -94,7 +96,7 @@ class ContactRepositoryImplTest {
 
         every { cursor.close() } just Runs
 
-        val contacts = repository.getContacts()
+        val contacts = repository.getContacts().first()
 
         assertEquals(1, contacts.size)
         assertEquals("", contacts[0].phoneNumber)
@@ -113,11 +115,12 @@ class ContactRepositoryImplTest {
 
         every { cursor.close() } just Runs
 
-        val contacts = repository.getContacts()
+        val contacts = repository.getContacts().first()
 
         assertEquals(1, contacts.size)
-        assertEquals("",contacts[0].name)
+        assertEquals("", contacts[0].name)
     }
+
     @Test
     fun `getContacts handles empty values`() = runTest {
         val cursor = mockk<Cursor>()
@@ -131,11 +134,12 @@ class ContactRepositoryImplTest {
 
         every { cursor.close() } just Runs
 
-        val contacts = repository.getContacts()
+        val contacts = repository.getContacts().first()
 
         assertEquals(1, contacts.size)
         assertEquals("", contacts[0].name)
         assertEquals("", contacts[0].phoneNumber)
     }
-
 }
+
+
