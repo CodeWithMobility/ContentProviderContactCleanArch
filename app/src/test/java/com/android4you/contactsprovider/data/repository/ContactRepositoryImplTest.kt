@@ -97,7 +97,7 @@ class ContactRepositoryImplTest {
         val contacts = repository.getContacts()
 
         assertEquals(1, contacts.size)
-        assertEquals("", contacts[0].phoneNumber)
+        assertEquals(null, contacts[0].phoneNumber)
     }
 
     @Test
@@ -116,8 +116,21 @@ class ContactRepositoryImplTest {
         val contacts = repository.getContacts()
 
         assertEquals(1, contacts.size)
-        assertEquals("",contacts[0].name)
+        assertEquals(null, contacts[0].name)
     }
+
+    @Test
+    fun `getContacts returns empty list when required columns are missing`() = runTest {
+        val cursor = mockk<Cursor>()
+        every { contentResolver.query(any(), any(), any(), any(), any()) } returns cursor
+        every { cursor.getColumnIndex(any()) } returns -1
+        every { cursor.close() } just Runs
+
+        val contacts = repository.getContacts()
+
+        assertTrue(contacts.isEmpty())
+    }
+
     @Test
     fun `getContacts handles empty values`() = runTest {
         val cursor = mockk<Cursor>()

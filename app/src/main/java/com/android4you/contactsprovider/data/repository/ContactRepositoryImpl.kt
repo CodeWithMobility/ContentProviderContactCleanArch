@@ -8,8 +8,8 @@ import com.android4you.contactsprovider.domain.repository.ContactRepository
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
-fun Cursor.getSafeString(index: Int): String = getString(index) ?: ""
-
+private fun Cursor.getSafeString(index: Int): String? =
+    runCatching { getString(index) }.getOrNull()
 
 class ContactRepositoryImpl(
     private val contentResolver: ContentResolver
@@ -34,13 +34,18 @@ class ContactRepositoryImpl(
             val nameIndex = it.getColumnIndex(ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME)
             val numberIndex = it.getColumnIndex(ContactsContract.CommonDataKinds.Phone.NUMBER)
 
+            if (idIndex == -1 || nameIndex == -1 || numberIndex == -1) {
+                return@withContext contacts
+            }
+
             while (it.moveToNext()) {
-                val id = it.getString(idIndex)
-                val name = it.getString(nameIndex)?: ""
-                val number = it.getString(numberIndex)?:""
+                val id = it.getSafeString(idIndex) ?: continue
+                val name = it.getSafeString(nameIndex)
+                val number = it.getSafeString(numberIndex)
                 contacts.add(Contact(id, name, number))
             }
         }
+
         contacts
     }
 }

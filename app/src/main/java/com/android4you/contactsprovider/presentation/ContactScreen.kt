@@ -45,23 +45,20 @@ fun ContactScreen(viewModel: ContactViewModel = hiltViewModel()) {
         }
     }
 
-
-
-    LaunchedEffect(Unit) {
+    LaunchedEffect(hasPermission) {
         if (hasPermission) {
             viewModel.loadContacts()
-        } else {
+        } else if (!hasPermission) {
             permissionLauncher.launch(Manifest.permission.READ_CONTACTS)
         }
     }
 
     val contacts by viewModel.contacts.collectAsState()
     val isLoading by viewModel.isLoading.collectAsState()
+    val error by viewModel.error.collectAsState()
 
     when {
         isLoading -> CircularProgressIndicator()
-
-        contacts.isEmpty() && hasPermission -> Text("No contacts found.")
 
         !hasPermission -> {
             Column {
@@ -74,10 +71,21 @@ fun ContactScreen(viewModel: ContactViewModel = hiltViewModel()) {
             }
         }
 
+        error != null -> {
+            Column(Modifier.padding(16.dp)) {
+                Text(error ?: "Something went wrong.")
+                Button(onClick = { viewModel.loadContacts() }) {
+                    Text("Retry")
+                }
+            }
+        }
+
+        contacts.isEmpty() -> Text("No contacts found.")
+
         else -> LazyColumn {
             items(contacts) { contact ->
                 Column(Modifier.padding(16.dp)) {
-                    Text(contact.name)
+                    Text(contact.name ?: "Unknown contact")
                     Text(contact.phoneNumber ?: "No Number")
                 }
             }
