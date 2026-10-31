@@ -1,151 +1,131 @@
 package com.android4you.contactsprovider.presentation
 
+import app.cash.turbine.test
 import com.android4you.contactsprovider.data.repository.FakeContactRepository
 import com.android4you.contactsprovider.domain.model.Contact
-import com.android4you.contactsprovider.domain.repository.ContactRepository
-import com.android4you.contactsprovider.domain.usecase.GetContactsUseCase
-import junit.framework.TestCase.assertEquals
-import junit.framework.TestCase.assertFalse
-import junit.framework.TestCase.assertTrue
-import kotlinx.coroutines.Dispatchers
+import com.android4you.contactsprovider.domain.usecase.ObserveContactsUseCase
+import com.android4you.contactsprovider.util.MainDispatcherRule
 import kotlinx.coroutines.ExperimentalCoroutinesApi
-import kotlinx.coroutines.delay
-import kotlinx.coroutines.launch
-import kotlinx.coroutines.test.StandardTestDispatcher
-import kotlinx.coroutines.test.advanceUntilIdle
-import kotlinx.coroutines.test.resetMain
 import kotlinx.coroutines.test.runTest
-import kotlinx.coroutines.test.setMain
-import org.junit.After
-import org.junit.Before
+import org.junit.Assert.assertEquals
+import org.junit.Rule
 import org.junit.Test
 
 @OptIn(ExperimentalCoroutinesApi::class)
 class ContactViewModelTest {
 
-    private lateinit var viewModel: ContactViewModel
+    @get:Rule
+    val mainDispatcherRule = MainDispatcherRule()
 
-    @Before
-    fun setUp() {
-        Dispatchers.setMain(StandardTestDispatcher())
-        viewModel = ContactViewModel(GetContactsUseCase(FakeContactRepository()))
-    }
+    private val repository = FakeContactRepository()
+    private val viewModel = ContactViewModel(ObserveContactsUseCase(repository))
 
-    @After
-    fun tearDown() {
-        Dispatchers.resetMain()
+    @Test
+    fun `starts in Loading until the permission state is known`() = runTest {
+        viewModel.uiState.test {
+            assertEquals(ContactUiState.Loading, awaitItem())
+            expectNoEvents()
+        }
     }
 
     @Test
-    fun `loadContacts should update contacts and loading state`() = runTest {
-        viewModel.loadContacts()
+    fun `denied permission shows PermissionRequired`() = runTest {
+        viewModel.uiState.test {
+            assertEquals(ContactUiState.Loading, awaitItem())
 
-        advanceUntilIdle()
+            viewModel.onPermissionResult(false)
 
-        val expectedContacts = listOf(
-            Contact("1", "John Doe", "1234567890"),
-            Contact("2", "Jane Smith", null)
-        )
-
-        assertEquals(expectedContacts, viewModel.contacts.value)
-        assertFalse(viewModel.isLoading.value)
+            assertEquals(ContactUiState.PermissionRequired, awaitItem())
+        }
     }
 
     @Test
-    fun `loadContacts returns expected contacts`() = runTest {
-        val fakeRepo = object : ContactRepository {
-            override suspend fun getContacts() = listOf(
-                Contact("1", "Alice", "1234"),
-                Contact("2", "Bob", null)
+    fun `granted permission shows contacts`() = runTest {
+        viewModel.uiState.test {
+            assertEquals(ContactUiState.Loading, awaitItem())
+
+            viewModel.onPermissionResult(true)
+
+            assertEquals(
+                ContactUiState.Success(FakeContactRepository.defaultContacts),
+                awaitItem()
             )
         }
-
-        viewModel = ContactViewModel(GetContactsUseCase(fakeRepo))
-        viewModel.loadContacts()
-
-        advanceUntilIdle()
-
-        val result = viewModel.contacts.value
-        assertEquals(2, result.size)
-        assertEquals("Alice", result[0].name)
-        assertEquals("Bob", result[1].name)
     }
 
     @Test
-    fun `loadContacts handles empty list`() = runTest {
-        val fakeRepo = object : ContactRepository {
-            override suspend fun getContacts() = emptyList<Contact>()
+    fun `granted permission with no contacts shows empty Success`() = runTest {
+        val vm = ContactViewModel(ObserveContactsUseCase(FakeContactRepository(emptyList())))
+
+        vm.uiState.test {
+            assertEquals(ContactUiState.Loading, awaitItem())
+
+            vm.onPermissionResult(true)
+
+            assertEquals(ContactUiState.Success(emptyList()), awaitItem())
         }
-
-        viewModel = ContactViewModel(GetContactsUseCase(fakeRepo))
-        viewModel.loadContacts()
-
-        advanceUntilIdle()
-
-        assertTrue(viewModel.contacts.value.isEmpty())
     }
 
     @Test
-    fun `loadContacts handles exception and sets error message`() = runTest {
-        val fakeRepo = object : ContactRepository {
-            override suspend fun getContacts(): List<Contact> {
-                throw RuntimeException("Contact fetch failed")
-            }
+    fun `new contacts from the repository update the state`() = runTest {
+        viewModel.uiState.test {
+            assertEquals(ContactUiState.Loading, awaitItem())
+            viewModel.onPermissionResult(true)
+            assertEquals(
+                ContactUiState.Success(FakeContactRepository.defaultContacts),
+                awaitItem()
+            )
+
+            val updated = listOf(Contact("3", "Alice", listOf("555")))
+            repository.emit(updated)
+
+            assertEquals(ContactUiState.Success(updated), awaitItem())
         }
-
-        viewModel = ContactViewModel(GetContactsUseCase(fakeRepo))
-        viewModel.loadContacts()
-
-        advanceUntilIdle()
-
-        assertEquals("Contact fetch failed", viewModel.error.value)
-        assertTrue(viewModel.contacts.value.isEmpty())
-        assertFalse(viewModel.isLoading.value)
     }
 
     @Test
-    fun `loadContacts sets isLoading correctly`() = runTest {
-        val fakeRepo = object : ContactRepository {
-            override suspend fun getContacts(): List<Contact> {
-                delay(100) // Simulate loading
-                return listOf(Contact("1", "Delayed Contact", "5555"))
-            }
+    fun `repository failure shows Error`() = runTest {
+        repository.error = RuntimeException("Contact fetch failed")
+
+        viewModel.uiState.test {
+            assertEquals(ContactUiState.Loading, awaitItem())
+
+            viewModel.onPermissionResult(true)
+
+            assertEquals(ContactUiState.Error, awaitItem())
         }
-
-        viewModel = ContactViewModel(GetContactsUseCase(fakeRepo))
-        val job = launch {
-            viewModel.loadContacts()
-        }
-
-        // Immediately after launch
-        assertFalse(viewModel.isLoading.value)
-
-        advanceUntilIdle() // Complete delay
-
-        assertFalse(viewModel.isLoading.value)
-        job.cancel()
     }
 
     @Test
-    fun `loadContacts multiple calls overwrite previous contacts`() = runTest {
-        val repo1 = object : ContactRepository {
-            override suspend fun getContacts() = listOf(Contact("1", "First", "123"))
+    fun `SecurityException maps to PermissionRequired`() = runTest {
+        repository.error = SecurityException("READ_CONTACTS revoked")
+
+        viewModel.uiState.test {
+            assertEquals(ContactUiState.Loading, awaitItem())
+
+            viewModel.onPermissionResult(true)
+
+            assertEquals(ContactUiState.PermissionRequired, awaitItem())
         }
-
-        val repo2 = object : ContactRepository {
-            override suspend fun getContacts() = listOf(Contact("2", "Second", "456"))
-        }
-
-        viewModel = ContactViewModel(GetContactsUseCase(repo1))
-        viewModel.loadContacts()
-        advanceUntilIdle()
-        assertEquals("First", viewModel.contacts.value.first().name)
-
-        viewModel = ContactViewModel(GetContactsUseCase(repo2))
-        viewModel.loadContacts()
-        advanceUntilIdle()
-        assertEquals("Second", viewModel.contacts.value.first().name)
     }
 
+    @Test
+    fun `retry reloads after an error`() = runTest {
+        repository.error = RuntimeException("boom")
 
+        viewModel.uiState.test {
+            assertEquals(ContactUiState.Loading, awaitItem())
+            viewModel.onPermissionResult(true)
+            assertEquals(ContactUiState.Error, awaitItem())
+
+            repository.error = null
+            viewModel.retry()
+
+            // The intermediate Loading state may be conflated away, so only the final state is asserted.
+            assertEquals(
+                ContactUiState.Success(FakeContactRepository.defaultContacts),
+                expectMostRecentItem()
+            )
+        }
+    }
 }
